@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path=".gitignore" />
+    <File Path="ReadMe.md" />
+  </Folder>
+  <Project Path="SerenCluster/SerenCluster.csproj" />
+  <Project Path="SerenRuntimeHost/SerenRuntimeHost.csproj" />
+</Solution>

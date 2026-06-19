@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SerenCluster</RootNamespace>
+    <AssemblyName>SerenCluster</AssemblyName>
+    <Description>
+      Cluster management library for the Seren stack. Provides typed clients
+      for the per-Jetson seren-agent API, a cluster-wide capability map, and
+      a background discovery service. Used by SerenRuntimeHost; future SCC
+      consumers will reference this too.
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,2826 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Seren Cluster · Dashboard</title>
+    <style>
+        /* ---------------------------------------------------------------------
+        * MONOCHROME PALETTE (placeholder - swap for your color scheme later).
+        * Variables only; nothing else hardcodes colors. Find/replace these
+        * once you've nailed the layout to repaint the whole UI.
+        * --------------------------------------------------------------------- */
+        :root {
+            /* ===========================================================
+            *  SEREN PALETTE - repaint these to retheme the whole UI.
+            *  All other CSS rules reference these vars; nothing
+            *  hard-codes colors below this block.
+            * ========================================================== */
+            /* Backgrounds - darkest at page, lighter on cards */
+            --bg-page: #0F1222; /* deep space navy - page background */
+            --bg-card: #13151E; /* slightly lighter slate - node cards, modal */
+            --bg-row: #29326D; /* saturated muted indigo - interactive rows, headers */
+            --bg-row-selected: #131732;
+            --bg-overlay: #0B1026E6; /* page bg with alpha - modal backdrop dim */
+            /* Borders - subtle hairlines, brighter on hover/focus */
+            --border: #1E2A78; /* indigo - card edges, dividers */
+            --border-hi: #6F3AFF; /* electric purple - hover/focus rings */
+            /* Text - light on dark, three tiers of emphasis */
+            --text-hi: #E6F0FF; /* icy white - primary text, values */
+            --text-mid: #B7C5E0; /* muted ice - secondary text (labels) */
+            --text-lo: #6A7AA0; /* dim ice - tertiary text (timestamps, hints) */
+            /* Status - running/loading/down/library, plus thermal */
+            --status-ok: #B7FF4C; /* electric green - running, healthy port */
+            --status-warn: #FFD23F; /* amber - loading, degraded */
+            --status-down: #FF4D6D; /* coral - stopped, unreachable, reboot icon */
+            --status-hot: #FF7A48; /* orange - thermal warning (pulsing bg) */
+            --status-lib: #6FF3D6; /* mint - library-mode services (different "ok") */
+            /* Accent - primary interactive color, focus ring */
+            --accent: #6F3AFF; /* electric purple - primary buttons, focus */
+            --accent-strong: #FF59E6; /* hot pink - high-emphasis interactive */
+            --accent-info: #00C2C7; /* cyan - informational, links */
+
+            --radius: 6px;
+            --gap: 12px;
+            --pad: 14px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        /* ---------------------------------------------------------------------
+        *  TOUCH DEFAULTS - applied only to touch-primary devices
+        *
+        *  `@media (pointer: coarse)` matches touch screens and other
+        *  imprecise pointers (phones, tablets, touchscreen kiosks like
+        *  the GeeekPi on the NUC). Desktop users with mice / trackpads
+        *  get `pointer: fine` and skip this block.
+        *
+        *  What we kill:
+        *    - text selection on tap (annoying when tapping cards/rows)
+        *    - iOS long-press callout (would show a context menu)
+        *    - tap-highlight flash (the grey rectangle that appears on tap)
+        *    - double-tap to zoom (would zoom into the dashboard, breaks layout)
+        *
+        *  What we keep:
+        *    - scrolling (touch-action: manipulation preserves pan)
+        *    - text selection in logs panes (re-enabled explicitly below)
+        * --------------------------------------------------------------------- */
+        @media (pointer: coarse) {
+            * {
+                user-select: none;
+                -webkit-user-select: none;
+                -webkit-touch-callout: none;
+                -webkit-tap-highlight-color: transparent;
+                touch-action: manipulation;
+            }
+            /* Logs are the exception - must be selectable so people can
+               copy stack traces. Both the agent request log and the
+               service drill-down log pane re-enable selection. */
+            .svc-drill-logs,
+            .svc-drill-logs * {
+                user-select: text;
+                -webkit-user-select: text;
+                -webkit-touch-callout: default;
+            }
+        }
+
+        html, body {
+            margin: 0;
+            background: var(--bg-page);
+            color: var(--text-hi);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        /* ---------------------------------------------------------------------
+        *  TOP BAR
+        * --------------------------------------------------------------------- */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-card);
+        }
+
+            header h1 {
+                margin: 0;
+                font-size: 14px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                color: var(--text-hi);
+            }
+
+            header .meta {
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                color: var(--text-lo);
+                font-size: 12px;
+            }
+
+        /* Big LED - single rollup status indicator. Top-right corner. */
+        .led {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--status-down);
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+
+            .led.ok {
+                background: var(--status-ok);
+            }
+
+            .led.warn {
+                background: var(--status-warn);
+            }
+
+            .led.gap {
+                background: var(--status-hot);
+            }
+
+            .led.down {
+                background: var(--status-down);
+            }
+
+        /* ---------------------------------------------------------------------
+        *  NODE GRID
+        * --------------------------------------------------------------------- */
+        main {
+            padding: var(--gap);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: var(--gap);
+        }
+
+        .node {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: calc(var(--pad)/2);
+            cursor: pointer;
+            transition: border-color 0.15s;
+            display: flex;
+            flex-direction: column;
+            min-height: 220px;
+        }
+
+            .node:hover {
+                border-color: var(--border-hi);
+            }
+
+            .node.offline {
+                opacity: 0.6;
+            }
+
+        /* ---------------------------------------------------------------------
+        *  ACTIONS CARD - the "card-shaped" 5th grid item that houses the
+        *  settings + refresh buttons. Same outer shape as a node card so
+        *  it visually belongs to the row, but its interior is two big
+        *  buttons stacked vertically, pushed to top + bottom edges with
+        *  space-between. Fingers go where eyes already look.
+        * --------------------------------------------------------------------- */
+        .actions-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: var(--pad);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: var(--gap);
+            min-height: 220px;
+        }
+
+        .actions-btn {
+            flex: 1; /* split the column 50/50 between the two buttons */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text-hi);
+            font-family: inherit;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+            padding: 0;
+        }
+
+            .actions-btn:hover:not(:disabled) {
+                border-color: var(--accent);
+                background: var(--bg-row);
+            }
+
+            .actions-btn:disabled {
+                opacity: 0.4;
+                cursor: default;
+            }
+
+            .actions-btn .actions-icon {
+                font-size: 32px;
+                line-height: 1;
+                color: var(--accent);
+            }
+
+            .actions-btn .actions-label {
+                font-size: 12px;
+                color: var(--text-mid);
+            }
+
+        .node-name {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 1px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .node-ip {
+            font-size: 11px;
+            color: var(--text-lo);
+            /* Was 12px - pushed the service list down so far that the NUC
+               card (5 services) became visibly taller than the others.
+               Tightened so the header reads as a single compact block. */
+            margin-bottom: 6px;
+        }
+
+        /* Service rows table-style for column alignment */
+        .svc-list {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 4px 12px;
+            align-content: start;
+            font-size: 13px;
+            margin-bottom: 12px;
+        }
+
+            .svc-list .svc-name {
+                color: var(--text-hi);
+            }
+
+                /* Service-type badge in the grid card (same visual rules as
+                   the modal version - keep them in sync if either changes). */
+                .svc-list .svc-name .svc-badge {
+                    display: inline-block;
+                    margin-right: 0.35em;
+                    font-size: 0.85em;
+                    cursor: help;
+                    opacity: 0.85;
+                    vertical-align: -1px;
+                }
+
+            .svc-list .svc-mem {
+                color: var(--text-mid);
+                text-align: right;
+            }
+
+            .svc-list .svc-stat {
+                text-align: center;
+                font-size: 12px;
+                font-weight: bold;
+                width: 1em;
+            }
+
+        .svc-stat.ok {
+            color: var(--status-ok);
+        }
+
+        .svc-stat.warn {
+            color: var(--status-warn);
+        }
+
+        .svc-stat.down {
+            color: var(--status-down);
+        }
+
+        .svc-list .svc-empty {
+            grid-column: 1 / -1;
+            color: var(--text-lo);
+            font-style: italic;
+            text-align: center;
+            padding: 20px 0;
+        }
+
+        /* Footer of the node card - temp + memory total */
+        .node-footer {
+            border-top: 1px solid var(--border);
+            padding-top: 8px;
+            font-size: 12px;
+            color: var(--text-mid);
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+            .node-footer .row {
+                display: flex;
+                justify-content: space-between;
+            }
+
+        .temp-hot {
+            color: var(--status-hot);
+            /* gentle pulse - visible but not anxiety-inducing */
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        .temp-danger {
+            color: var(--status-down);
+            font-weight: bold;
+            /* faster pulse - this is the "your hardware is suffering" state */
+            animation: pulse 0.6s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        @keyframes header-bg-pulse {
+            0%, 100% {
+                background-color: transparent;
+            }
+
+            50% {
+                background-color: color-mix(in srgb, var(--status-down) 18%, transparent);
+            }
+        }
+
+        .node-header-danger {
+            border-radius: var(--radius);
+            animation: header-bg-pulse 0.6s ease-in-out infinite;
+        }
+
+        /* ---------------------------------------------------------------------
+        *  CAPABILITY GAPS STRIP - only shown when there are unavailable services
+        * --------------------------------------------------------------------- */
+        .gaps {
+            margin-top: var(--gap);
+            padding: 10px var(--pad);
+            border: 1px solid var(--status-down);
+            border-radius: var(--radius);
+            background: var(--bg-card);
+            font-size: 13px;
+        }
+
+            .gaps strong {
+                color: var(--status-down);
+            }
+
+            .gaps .gap-list {
+                margin-top: 4px;
+                color: var(--text-mid);
+            }
+
+        /* ---------------------------------------------------------------------
+        *  SETTINGS MODAL - uses the Phase 2 modal-backdrop machinery.
+        *  Smaller than the node drill-down (just a form with two inputs)
+        *  so we cap its size more aggressively.
+        * --------------------------------------------------------------------- */
+        .settings-modal {
+            width: min(860px, 95vw);
+            height: auto;
+            max-height: 90vh;
+        }
+
+        /* Two-column layout: inputs on the left, action buttons on the right.
+           On very short screens (the 420px touch panel) everything still fits
+           in one comfortable horizontal pass. */
+        .settings-body {
+            padding: var(--pad);
+            display: grid;
+            grid-template-columns: 1fr auto;
+            grid-template-rows: auto auto auto;
+            column-gap: 20px;
+            row-gap: 12px;
+            font-size: 13px;
+            align-items: start;
+        }
+
+        /* Inputs column (left) */
+        .settings-inputs {
+            grid-column: 1;
+            grid-row: 1 / span 2;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+            .settings-inputs label {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                color: var(--text-mid);
+            }
+
+            .settings-inputs input {
+                width: 100%;
+                background: var(--bg-page);
+                color: var(--text-hi);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                padding: 10px 12px;
+                font-family: inherit;
+                font-size: 13px;
+                user-select: text;
+                -webkit-user-select: text;
+                -webkit-touch-callout: default;
+                box-sizing: border-box;
+            }
+
+                .settings-inputs input:focus {
+                    outline: none;
+                    border-color: var(--accent);
+                }
+
+        /* Action buttons column (right) - stacked vertically */
+        .settings-actions {
+            grid-column: 2;
+            grid-row: 1 / span 2;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            justify-content: center;
+            align-self: stretch;
+        }
+
+        .settings-body .save {
+            background: var(--accent);
+            color: var(--text-hi);
+            border: none;
+            padding: 12px 20px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+            .settings-body .save:hover {
+                background: var(--accent-strong);
+            }
+
+        .settings-body .update-nodes-btn {
+            background: transparent;
+            color: var(--status-warn);
+            border: 1px solid var(--status-warn);
+            padding: 12px 20px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+            .settings-body .update-nodes-btn:hover:not(:disabled) {
+                background: var(--status-warn);
+                color: var(--bg-page);
+            }
+
+            .settings-body .update-nodes-btn:disabled {
+                opacity: 0.45;
+                cursor: not-allowed;
+            }
+
+        /* Bottom row: hints + update result, spans both columns */
+        .settings-footer {
+            grid-column: 1 / -1;
+            grid-row: 3;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .settings-body .update-result {
+            font-size: 11px;
+            color: var(--text-lo);
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+            .settings-body .update-result.ok {
+                color: var(--status-ok);
+            }
+
+            .settings-body .update-result.err {
+                color: var(--status-down);
+            }
+
+        .settings-body .hint {
+            color: var(--text-lo);
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        /* ---------------------------------------------------------------------
+        *  ERROR BANNER - shown when the API is unreachable or auth fails
+        * --------------------------------------------------------------------- */
+        .banner {
+            padding: 10px 16px;
+            background: var(--status-down);
+            color: var(--bg-page);
+            font-weight: 600;
+            text-align: center;
+            display: none;
+        }
+
+            .banner.visible {
+                display: block;
+            }
+
+        /* ---------------------------------------------------------------------
+         * MODAL-LOCAL FLASH MESSAGE
+         *
+         * Per-node action results (update success/fail, etc.) display here
+         * instead of the cluster-wide banner. Cluster banner is reserved for
+         * genuinely cluster-wide concerns (RuntimeHost unreachable, etc.) -
+         * routing a per-node error to the cluster banner means the user has
+         * to close the modal to see it, which is bad UX.
+         *
+         * Lives as an absolutely-positioned strip across the top of the
+         * modal so it overlays the service list without reflowing it.
+         * Auto-dismisses on a timer; persistent errors get a close button.
+         * --------------------------------------------------------------------- */
+        .modal-flash {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 10px 16px;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: var(--radius) var(--radius) 0 0;
+            z-index: 20;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+            .modal-flash.visible {
+                display: flex;
+            }
+
+            .modal-flash.flash-ok {
+                background: var(--status-ok);
+                color: #061a0d;
+            }
+
+            .modal-flash.flash-err {
+                background: var(--status-down);
+                color: #fff;
+            }
+
+            .modal-flash.flash-info {
+                background: var(--accent);
+                color: #fff;
+            }
+
+            .modal-flash .flash-msg {
+                flex: 1;
+                white-space: pre-wrap;
+            }
+
+            .modal-flash .flash-close {
+                background: transparent;
+                border: none;
+                color: inherit;
+                font-size: 18px;
+                cursor: pointer;
+                line-height: 1;
+                padding: 2px 8px;
+                opacity: 0.8;
+            }
+
+                .modal-flash .flash-close:hover {
+                    opacity: 1;
+                }
+
+        /* Modal needs position:relative so the absolutely-positioned flash
+           lands at the modal's top-edge, not the viewport's. Set on .modal
+           in the MODAL section below. */
+
+        /* ---------------------------------------------------------------------
+        * MODAL - Phase 2 drill-down
+        *
+        *
+        * Layout: backdrop covers screen, panel centered with caps
+        *   ┌---- header --------------------┐
+        *   │ service list │ scroll │ reboot │
+        *   └--------------------------------┘
+        *
+        * Reboot is its own RIGHT-EDGE column, structurally separated from
+        * service rows so you can't fat-finger it while scrolling.
+        * --------------------------------------------------------------------- */
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: var(--bg-overlay);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            column-gap: 24px;
+            z-index: 100;
+        }
+
+            .modal-backdrop.visible {
+                display: flex;
+            }
+
+        /* Modal: position:relative is required so the absolutely-positioned
+           modal-flash lands at the modal's top-edge, not the viewport's. */
+        .modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border-hi);
+            border-radius: var(--radius);
+            width: min(1100px, 95vw);
+            height: min(650px, 90vh);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Header: hostname / ip / temp / uptime, plus a close X */
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--pad);
+            border-bottom: 1px solid var(--border);
+            min-height: 64px;
+        }
+
+        .modal-header-fields {
+            display: flex;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+
+        .modal-header-field {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .modal-header-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-lo);
+        }
+
+        .modal-header-value {
+            font-size: 18px;
+            font-weight: 500;
+            color: var(--text-hi);
+        }
+
+        .modal-close {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-mid);
+            font-size: 20px;
+            line-height: 1;
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius);
+            cursor: pointer;
+        }
+
+            .modal-close:hover {
+                border-color: var(--border-hi);
+                color: var(--text-hi);
+            }
+
+        /* Body: three columns - service list (flex), scroll col (64px), reboot col (260px) */
+        .modal-body {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 64px 260px; /* svc list | scroll col (finger-sized) | reboot */
+            min-height: 0; /* allow children to scroll */
+        }
+
+        /* Service list column. Uses CSS grid for the table-like layout. */
+        .modal-svc-list {
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-svc-header {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+            padding: 8px var(--pad);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-lo);
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-row);
+        }
+
+        .modal-svc-rows {
+            overflow: hidden;
+            flex: 1;
+        }
+
+        .modal-svc-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+            align-items: center;
+            padding: 0 var(--pad);
+            height: 64px; /* finger-friendly - generous touch target */
+            border-bottom: 1px solid var(--border);
+            color: var(--text-hi);
+            cursor: pointer;
+        }
+
+            .modal-svc-row:hover {
+                background: var(--bg-row-selected);
+            }
+
+            .modal-svc-row .name {
+                font-weight: 500;
+            }
+
+                /* Service-type badge - the little emoji that sits next to the
+                    service name and tells you what kind of thing it is at a glance.
+                    Sized slightly smaller than the name text so it doesn't compete
+                    visually; gets a faint cursor-help affordance to suggest the
+                    hover-for-tooltip behavior. */
+                .modal-svc-row .name .svc-badge {
+                    display: inline-block;
+                    margin-right: 0.4em;
+                    font-size: 0.9em;
+                    cursor: help;
+                    opacity: 0.85;
+                    vertical-align: -1px;
+                }
+
+            .modal-svc-row .num,
+            .modal-svc-row .state {
+                color: var(--text-mid);
+                font-variant-numeric: tabular-nums;
+            }
+
+                .modal-svc-row .state.running {
+                    color: var(--status-ok);
+                }
+
+                .modal-svc-row .state.loading {
+                    color: var(--status-warn);
+                }
+
+                .modal-svc-row .state.down {
+                    color: var(--status-down);
+                }
+
+                .modal-svc-row .state.library {
+                    color: var(--status-lib);
+                }
+
+        /* Scroll column. ▲ thumb-area ▼ */
+        .modal-scroll {
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-card);
+        }
+
+        .modal-scroll-btn {
+            flex: 0 0 64px;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-mid);
+            font-size: 22px;
+            cursor: pointer;
+        }
+
+            .modal-scroll-btn:last-child {
+                border-bottom: none;
+                border-top: 1px solid var(--border);
+            }
+
+            .modal-scroll-btn:hover:not(:disabled) {
+                color: var(--text-hi);
+                background: var(--bg-card);
+            }
+
+            .modal-scroll-btn:disabled {
+                opacity: 0.25;
+                cursor: default;
+            }
+
+        .modal-scroll-thumb {
+            flex: 1;
+            position: relative;
+            background: var(--bg-card);
+        }
+
+        .modal-scroll-thumb-bar {
+            position: absolute;
+            left: 8px;
+            right: 8px;
+            background: var(--border-hi);
+            border-radius: 4px;
+            min-height: 24px;
+        }
+
+        /* Reboot column. Icon + label, fills the right edge. */
+        .modal-reboot {
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            background: var(--bg-card);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+            .modal-reboot:hover {
+                background: var(--bg-row);
+            }
+
+        /* Update button sits above the reboot button in the right column,
+           taking roughly half the height. Uses the same column slot but is
+           split by the grid row layout via .modal-actions-col wrapper. */
+        .modal-actions-col {
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-update-node {
+            flex: 1;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: var(--bg-card);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+            .modal-update-node:hover:not(.updating) {
+                background: var(--bg-row);
+            }
+
+            .modal-update-node.updating {
+                opacity: 0.55;
+                cursor: wait;
+            }
+
+        .modal-update-node-icon {
+            font-size: 32px; /* matches .actions-btn .actions-icon */
+            color: var(--accent); /* purple, matches refresh/settings icons */
+            line-height: 1;
+        }
+
+        .modal-update-node-label {
+            font-size: 12px; /* matches .actions-btn .actions-label */
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-mid);
+            text-align: center;
+            padding: 0 6px;
+        }
+
+        /* When update-node is present, reboot sits below it - no border-left
+           (parent .modal-actions-col owns the left border). */
+        .modal-actions-col .modal-reboot {
+            flex: 1;
+            border-left: none;
+        }
+
+        .modal-reboot-icon {
+            font-size: 32px; /* matches .actions-btn .actions-icon for consistency */
+            color: var(--status-down);
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-reboot-label {
+            /* Match .actions-btn .actions-label sizing - was 42px (typo from when
+               the label was an icon stand-in). The big size forced "REBOOT NODE"
+               to wrap to two lines in the cramped right column. */
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-mid);
+            text-align: center;
+            padding: 0 6px;
+        }
+
+        /* -- Confirm state: replace service list area with Are You Sure? -- */
+        .modal-confirm {
+            grid-column: 1 / span 2; /* span the service list + scroll column */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 24px;
+            padding: var(--pad);
+        }
+
+        .modal-confirm-title {
+            font-size: 22px;
+            color: var(--text-hi);
+        }
+
+        /* Optional secondary line under the confirm title - used by the
+           update-confirm flow to add context ("agent will restart"). Smaller
+           and dimmer than the title; lives in the same vertical stack. */
+        .modal-confirm-subtitle {
+            font-size: 13px;
+            color: var(--text-mid);
+            max-width: 460px;
+            text-align: center;
+            line-height: 1.4;
+            margin-top: -4px;
+        }
+
+        .modal-confirm-buttons {
+            display: flex;
+            gap: 16px;
+        }
+
+        .modal-confirm-btn {
+            min-width: 140px;
+            min-height: 56px;
+            padding: 0 24px;
+            font-size: 18px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border-hi);
+            background: var(--bg-row);
+            color: var(--text-hi);
+            cursor: pointer;
+        }
+
+            .modal-confirm-btn:hover:not(:disabled) {
+                background: var(--bg-card);
+                border-color: var(--accent);
+            }
+
+            .modal-confirm-btn:disabled {
+                opacity: 0.35;
+                cursor: default;
+            }
+
+            .modal-confirm-btn.yes {
+                border-color: var(--status-down);
+                color: var(--status-down);
+            }
+
+        /* Reboot column in "armed" state - disabled until Yes tapped, then enables. */
+        .modal-reboot.armed-pending {
+            opacity: 0.35;
+            cursor: default;
+        }
+
+            .modal-reboot.armed-pending:hover {
+                background: var(--bg-row);
+            }
+
+        .modal-reboot.armed-ready {
+            background: var(--bg-card);
+        }
+
+            .modal-reboot.armed-ready .modal-reboot-icon,
+            .modal-reboot.armed-ready .modal-reboot-label {
+                color: var(--status-down);
+            }
+
+        /* Countdown state: replace whole body. Horizontal layout so it fits
+           even on the 280px-tall touchscreen - title left, big number middle,
+           Cancel button right. None of them get clipped vertically. */
+        .modal-countdown {
+            grid-column: 1 / -1; /* span all 3 columns */
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            padding: var(--pad) calc(var(--pad) * 2);
+        }
+
+        .modal-countdown-title {
+            font-size: 16px;
+            color: var(--text-mid);
+            flex: 1;
+            min-width: 0; /* allow shrinking if name is long */
+        }
+
+        .modal-countdown-secs {
+            font-size: 64px;
+            font-variant-numeric: tabular-nums;
+            color: var(--status-down);
+            line-height: 1;
+            flex: 0 0 auto;
+        }
+
+        .modal-countdown-cancel {
+            min-width: 180px;
+            min-height: 56px;
+            padding: 0 24px;
+            font-size: 18px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border-hi);
+            background: var(--bg-row);
+            color: var(--text-hi);
+            cursor: pointer;
+            flex: 0 0 auto;
+        }
+
+            .modal-countdown-cancel:hover {
+                background: var(--bg-card);
+                border-color: var(--accent);
+            }
+
+        /* Make node cards visibly clickable */
+        .node {
+            cursor: pointer;
+        }
+
+            .node:hover {
+                border-color: var(--border-hi);
+            }
+
+        /* ---------------------------------------------------------------------
+         * Service drill-down body layout
+         * --------------------------------------------------------------------- */
+        .svc-drill-main {
+            grid-column: 1 / span 2; /* svc-list + scroll columns */
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            border-right: 1px solid var(--border);
+        }
+
+        .svc-drill-stats {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 1px;
+            background: var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .svc-stat-cell {
+            background: var(--bg-card);
+            padding: 8px var(--pad);
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .svc-stat-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-lo);
+        }
+
+        .svc-stat-value {
+            font-size: 15px;
+            color: var(--text-hi);
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+            .svc-stat-value.state.running {
+                color: var(--status-ok);
+            }
+
+            .svc-stat-value.state.loading {
+                color: var(--status-warn);
+            }
+
+            .svc-stat-value.state.down {
+                color: var(--status-down);
+            }
+
+            .svc-stat-value.state.library {
+                color: var(--text-mid);
+            }
+
+        .svc-drill-logs-wrap {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .svc-drill-logs-header {
+            padding: 6px var(--pad);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-lo);
+            background: var(--bg-row-selected);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .svc-drill-logs-path {
+            font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+            font-size: 10px;
+            color: var(--text-mid);
+            text-transform: none;
+            letter-spacing: 0;
+        }
+
+        .svc-drill-logs {
+            flex: 1;
+            margin: 0;
+            padding: var(--pad);
+            background: var(--bg-page);
+            color: var(--text-mid);
+            font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            overflow: auto;
+            white-space: pre;
+            min-height: 0;
+        }
+
+        .svc-drill-actions {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: stretch;
+            gap: 12px;
+            padding: var(--pad);
+            background: var(--bg-row);
+        }
+
+        .svc-action-btn {
+            min-height: 52px;
+            padding: 0 12px;
+            font-size: 14px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border-hi);
+            background: var(--bg-card);
+            color: var(--text-hi);
+            cursor: pointer;
+            text-align: center;
+        }
+
+            .svc-action-btn:hover:not(:disabled):not(.disabled) {
+                border-color: var(--accent);
+            }
+
+            .svc-action-btn:disabled,
+            .svc-action-btn.disabled {
+                opacity: 0.35;
+                cursor: default;
+            }
+
+            .svc-action-btn.danger {
+                border-color: var(--status-down);
+                color: var(--status-down);
+            }
+
+                .svc-action-btn.danger:hover:not(:disabled):not(.disabled) {
+                    background: var(--bg-card);
+                }
+
+        .svc-drill-libnote {
+            font-size: 12px;
+            color: var(--text-mid);
+            text-align: center;
+            padding: 8px;
+        }
+
+        .svc-stop-confirm {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+        }
+
+        .svc-stop-confirm-title {
+            font-size: 14px;
+            color: var(--text-hi);
+            text-align: center;
+            margin-bottom: 4px;
+        }
+
+        /* ---------------------------------------------------------------------
+         * TOUCHSCREEN / SHORT-VIEWPORT OVERRIDES
+         *
+         * The 1424×280 GeeekPi touchscreen on the NUC is an extreme ultra-wide
+         * letterbox. The default vertical layouts of the countdown body and
+         * confirm body would push their bottom buttons off the visible area.
+         *
+         * When viewport height <= 400px, switch to horizontal layouts so all
+         * action buttons stay visible. Triggers automatically - no JS, no
+         * device detection, just "if the screen is short, lay things out
+         * sideways."
+         * --------------------------------------------------------------------- */
+        @media (max-height: 400px) {
+            /* Modal itself: more aggressive size cap */
+            .modal {
+                height: 95vh;
+                width: 98vw;
+            }
+
+            .modal-header {
+                min-height: 48px;
+                padding: 8px var(--pad);
+            }
+
+            .modal-header-value {
+                font-size: 15px;
+            }
+
+            .modal-header-fields {
+                gap: 16px;
+            }
+
+            /* Countdown - horizontal: title | giant number | cancel button.
+               All three on one row so the cancel button is always visible. */
+            .modal-countdown {
+                flex-direction: row;
+                gap: 16px;
+                padding: 8px var(--pad);
+                justify-content: center;
+            }
+
+            .modal-countdown-title {
+                font-size: 14px;
+            }
+
+            .modal-countdown-secs {
+                font-size: 48px;
+            }
+
+            .modal-countdown-cancel {
+                min-height: 48px;
+                min-width: 160px;
+                font-size: 16px;
+            }
+
+            /* Confirm - same idea: title | Yes/No | spacer (right reboot col
+               stays in its own grid column on the right edge). */
+            .modal-confirm {
+                gap: 12px;
+                padding: 8px var(--pad);
+            }
+
+            .modal-confirm-title {
+                font-size: 17px;
+            }
+
+            .modal-confirm-buttons {
+                gap: 10px;
+            }
+
+            .modal-confirm-btn {
+                min-height: 48px;
+                min-width: 110px;
+                font-size: 16px;
+                padding: 0 16px;
+            }
+
+            /* Service row - bump to 56px on the touchscreen for adult fingers.
+               Below 56px the gap between rows becomes a finger-fight. We sacrifice
+               showing fewer rows at once in exchange for taps actually landing
+               on the row you meant. */
+            .modal-svc-row {
+                height: 56px;
+            }
+
+            .modal-svc-header {
+                padding: 6px var(--pad);
+                font-size: 10px;
+            }
+
+            /* Scroll buttons match the new row height */
+            .modal-scroll-btn {
+                flex-basis: 56px;
+                font-size: 20px;
+            }
+
+            /* Wider scroll column on touch too - fingers need room. */
+            .modal-body {
+                grid-template-columns: 1fr 56px 220px;
+            }
+
+            .modal-reboot-icon {
+                font-size: 36px;
+            }
+
+            .modal-reboot-label {
+                /* Was 32px - same typo cascade as the desktop styles, just
+                   inflated. Keep slightly bigger than desktop (13px vs 12px)
+                   for legibility on the touchscreen, but no more wrap. */
+                font-size: 13px;
+            }
+
+            .modal-update-node-icon {
+                font-size: 32px;
+            }
+
+            .modal-update-node-label {
+                font-size: 13px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>SEREN · CLUSTER</h1>
+        <div class="meta">
+            <span id="led-overall"><span class="led" id="led"></span><span id="led-text">connecting…</span></span>
+            <span id="last-refresh">-</span>
+        </div>
+    </header>
+
+    <!-- Settings modal - uses the same backdrop/panel pattern as the node drill-down. -->
+    <div class="modal-backdrop" id="settings-backdrop">
+        <div class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+            <div class="modal-header">
+                <div class="modal-header-fields">
+                    <div class="modal-header-field">
+                        <div class="modal-header-label">Settings</div>
+                        <div class="modal-header-value" id="settings-title">RuntimeHost connection</div>
+                    </div>
+                </div>
+                <button class="modal-close" id="settings-close" aria-label="Close">✕</button>
+            </div>
+            <div class="settings-body">
+                <div class="settings-inputs">
+                    <label>
+                        RuntimeHost URL
+                        <input type="text" id="cfg-url" placeholder="http://localhost:6361" />
+                    </label>
+                    <label>
+                        Bearer token
+                        <input type="password" id="cfg-token" placeholder="paste runtime.bearer_token here" />
+                    </label>
+                </div>
+                <div class="settings-actions">
+                    <button class="save" id="cfg-save">save</button>
+                    <button class="update-nodes-btn" id="cfg-update-nodes">update all nodes</button>
+                </div>
+                <div class="settings-footer">
+                    <div class="update-result" id="cfg-update-result" style="display:none;"></div>
+                    <div class="hint">URL &amp; token stored in localStorage. Update all nodes pushes the agent package and restarts each node agent.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="banner" id="banner"></div>
+
+    <main>
+        <div class="grid" id="grid">
+            <!-- node cards rendered here -->
+        </div>
+        <div class="gaps" id="gaps" style="display:none;">
+            <strong>Capability gaps</strong>
+            <div class="gap-list" id="gap-list"></div>
+        </div>
+    </main>
+
+    <!-- Node drill-down modal. Hidden by default; openNodeModal() toggles. -->
+    <div class="modal-backdrop" id="modal-backdrop">
+        <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <!-- Modal-local flash: per-node action results live here (not the
+                 cluster-wide banner). setModalFlash(msg, type) populates +
+                 shows it; close button or auto-timeout dismisses. -->
+            <div class="modal-flash" id="modal-flash" role="status" aria-live="polite">
+                <span class="flash-msg" id="modal-flash-msg"></span>
+                <button class="flash-close" id="modal-flash-close" aria-label="Dismiss">✕</button>
+            </div>
+            <!-- Header populated by renderModalContent() -->
+            <div class="modal-header">
+                <div class="modal-header-fields" id="modal-header-fields"></div>
+                <button class="modal-close" id="modal-close" aria-label="Close">✕</button>
+            </div>
+            <!-- Body - content swapped between {default, confirm, countdown, update-confirming} states -->
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+
+    <script>
+        'use strict';
+
+        // ----------------------------------------------------------------------
+        // CONFIG - pulled from localStorage, with sane defaults for first run.
+        //
+        // Default URL strategy:
+        //   - If we're served by RuntimeHost itself (the all-in-one deploy),
+        //     window.location.origin IS the RuntimeHost URL. Use that.
+        //   - If we're opened from `file://` or some other host, fall back to
+        //     localhost:6361 (typical local dev setup).
+        //   - User can always override via the Settings modal - localStorage
+        //     value wins if set.
+        //
+        // Default token strategy:
+        //   - Server-side, RuntimeHost optionally replaces the placeholder
+        //     __SEREN_BEARER_TOKEN__ with the actual token at /. If you see
+        //     "__SEREN_BEARER_TOKEN__" literally in this var below, server-side
+        //     injection ran but had nothing to inject (no bearer configured)
+        //     OR the dashboard was loaded from a static file server.
+        //   - User can always override via the Settings modal.
+        // ----------------------------------------------------------------------
+        const DEFAULT_URL = (window.location.protocol === 'http:' || window.location.protocol === 'https:')
+            ? window.location.origin
+            : 'http://localhost:6361';
+
+        // Server-injected token. RuntimeHost replaces the placeholder string
+        // below with the actual bearer token at startup (one-shot, before
+        // serving). If injection didn't run, the placeholder stays literal
+        // and we detect that to fall back to empty.
+        //
+        // We build the "untouched" sentinel via string concatenation so the
+        // server's literal-string-find-and-replace ONLY hits the placeholder
+        // line below, never this sentinel. Keeps the comparison honest.
+        const INJECTED_TOKEN_RAW = '__SEREN_BEARER_TOKEN__';
+        const UNTOUCHED_SENTINEL = '__SEREN_BEARER' + '_TOKEN__';
+        const INJECTED_TOKEN = (INJECTED_TOKEN_RAW === UNTOUCHED_SENTINEL) ? '' : INJECTED_TOKEN_RAW;
+
+        const POLL_INTERVAL = 5000;  // ms 
+        const TEMP_HOT_C = 75;    // pulse temperature reading at this threshold
+        const TEMP_DANGER_C = 85;    // pulse whole node header at this threshold
+
+        function loadCfg() {
+            // localStorage wins (user explicitly saved something), then
+            // server-injected token, then empty.
+            return {
+                url: localStorage.getItem('seren.url') || DEFAULT_URL,
+                token: localStorage.getItem('seren.token') || INJECTED_TOKEN || '',
+            };
+        }
+
+        function saveCfg(url, token) {
+            localStorage.setItem('seren.url', url);
+            localStorage.setItem('seren.token', token);
+        }
+
+        // ----------------------------------------------------------------------
+        // API CLIENT - thin fetch wrapper with auth header injection.
+        // Returns null on any failure; banner-displays the reason.
+        // ----------------------------------------------------------------------
+        // HTTP status codes we expect during normal operation (a node being down,
+        // a service not installed, a capability gap). These should NOT trigger
+        // the global banner - the caller decorates the affected card inline.
+        // 5xx for unreachable agents, 404 for not-installed-on-this-cluster.
+        const EXPECTED_STATUS = new Set([404, 503]);
+
+        async function api(path, opts = {}) {
+            const { url, token } = loadCfg();
+            // Build headers: base + caller overrides + auth. Caller overrides
+            // first so we can ALWAYS slap auth on top and never get accidentally
+            // un-authed by a caller setting headers.
+            const headers = {
+                'Accept': 'application/json',
+                ...(opts.headers || {}),
+            };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+
+            // If caller passed a `json` option, serialize it + set Content-Type.
+            // This is friendlier than every caller having to JSON.stringify and
+            // set the header themselves.
+            const fetchOpts = { ...opts, headers, mode: 'cors' };
+            if (opts.json !== undefined) {
+                headers['Content-Type'] = 'application/json';
+                fetchOpts.body = JSON.stringify(opts.json);
+                delete fetchOpts.json;
+            }
+
+            try {
+                const resp = await fetch(url + path, fetchOpts);
+                if (!resp.ok) {
+                    // Per-service / per-node failures are expected - they happen any
+                    // time a Jetson is rebooting or a service was stopped. Caller
+                    // gets null and renders the affected card as offline. We only
+                    // fire the global banner for unexpected status codes (auth errors,
+                    // 500 from the runtime itself, etc.).
+                    if (!EXPECTED_STATUS.has(resp.status)) {
+                        banner(`API ${path} → HTTP ${resp.status}`);
+                    }
+                    return null;
+                }
+                banner(null); // clear any previous error
+                return await resp.json();
+            } catch (e) {
+                // TypeError on fetch == network failure (RuntimeHost itself down,
+                // CORS, DNS, etc). This IS a global problem, fire the banner.
+                banner(`Cannot reach RuntimeHost - ${e.message}`);
+                return null;
+            }
+        }
+
+        function banner(msg) {
+            const el = document.getElementById('banner');
+            if (!msg) {
+                el.classList.remove('visible');
+                el.textContent = '';
+                return;
+            }
+            el.textContent = msg;
+            el.classList.add('visible');
+        }
+
+        // ----------------------------------------------------------------------
+        // MODAL-LOCAL FLASH
+        //
+        // Per-node action results display inside the modal that triggered them.
+        // The cluster-wide banner() is for cluster-wide concerns only.
+        //
+        //   setModalFlash(msg, type)  - show; type ∈ {ok, err, info}
+        //   setModalFlash(null)       - dismiss
+        //
+        // Auto-dismisses success/info messages after 4s; error messages persist
+        // until manually closed (so a transient poll doesn't whisk away an error
+        // the user hasn't seen yet).
+        // ----------------------------------------------------------------------
+        let _modalFlashTimer = null;
+        function setModalFlash(msg, type) {
+            const el = document.getElementById('modal-flash');
+            const msgEl = document.getElementById('modal-flash-msg');
+            if (!el || !msgEl) return;
+
+            if (_modalFlashTimer !== null) {
+                clearTimeout(_modalFlashTimer);
+                _modalFlashTimer = null;
+            }
+
+            if (!msg) {
+                el.classList.remove('visible', 'flash-ok', 'flash-err', 'flash-info');
+                msgEl.textContent = '';
+                return;
+            }
+
+            msgEl.textContent = msg;
+            el.classList.remove('flash-ok', 'flash-err', 'flash-info');
+            el.classList.add('visible', `flash-${type || 'info'}`);
+
+            // Success/info auto-dismiss; errors stay until dismissed manually.
+            // The reasoning: a poll might trigger a transient refresh that
+            // re-renders the modal body, but the flash element lives at the
+            // modal level (not the body), so it survives body re-renders.
+            // Errors are critical - let the user dismiss.
+            if (type !== 'err') {
+                _modalFlashTimer = setTimeout(() => setModalFlash(null), 4000);
+            }
+        }
+
+        // ----------------------------------------------------------------------
+        // STATUS SYMBOLS - match the original mockup spirit.
+        //   ●  running + healthy
+        //   ◐  running but port not responding (loading?)
+        //   ◯  not running
+        //   ⚠  degraded / unknown state
+        // ----------------------------------------------------------------------
+        function symbolFor(status) {
+            if (!status) return ['◯', 'down'];
+            if (!status.running && status.library_mode) return ['●', 'ok']; // chroma/coral
+            if (!status.running) return ['◯', 'down'];
+
+            // Running. Decide based on port_health:
+            //   - library_mode + running → healthy
+            //   - port_health null + running → systemd-managed (agent skips
+            //     its own self-probe). Trust 'running:true' alone.
+            //   - port_health.ok=true → healthy
+            //   - port_health.ok=false → port-down despite PID alive (loading?)
+            if (status.library_mode) return ['●', 'ok'];
+            const ph = status.port_health;
+            if (ph === null || ph === undefined) return ['●', 'ok']; // systemd-managed
+            if (ph.ok) return ['●', 'ok'];
+            return ['◐', 'warn'];
+        }
+
+        // ----------------------------------------------------------------------
+        // POLLING - managed handle so the modal can swap rates when open
+        // ----------------------------------------------------------------------
+        const MODAL_POLL_INTERVAL = 2000;   // faster refresh while drilled in
+        let pollHandle = null;
+
+        function startPolling(intervalMs) {
+            if (pollHandle !== null) clearInterval(pollHandle);
+            pollHandle = setInterval(refresh, intervalMs);
+        }
+
+        // ----------------------------------------------------------------------
+        // MODAL - Phase 2 node drill-down + Phase 3 service drill-down
+        //
+        // State machine for the reboot flow:
+        //   idle             → normal service-list view, ⏻ reboot button is a tap target
+        //   confirming       → service list replaced by "Are you sure?" + Yes/No;
+        //                      ⏻ button greyed out, says "Confirm above first"
+        //   armed            → Yes was tapped; Yes/No greyed; ⏻ button NOW tappable
+        //                      (this is the second tap that actually fires reboot)
+        //   countdown        → reboot scheduled; modal shows 60s countdown + Cancel
+        //                      button. Cancel fires /reboot/cancel.
+        //
+        // Phase 3 service drill-down states (orthogonal - different "page"
+        // entirely, but reuses the same modal frame for context-preserving UX):
+        //   svc-idle         → service detail view with logs + start/stop/restart
+        //   svc-confirm-stop → inline "Stop xxx?" + Yes/No (just for Stop; Start
+        //                      and Restart fire immediately since they're not
+        //                      destructive in the same way)
+        //
+        // Tap-outside-to-close ONLY in 'idle' or 'svc-idle' state - destructive
+        // ops require explicit dismissal.
+        // ----------------------------------------------------------------------
+        const modal = {
+            open: false,
+            nodeName: null,     // which node we're showing
+            scrollIndex: 0,     // first visible service row
+            rowsVisible: 0,     // computed on render
+            state: 'idle',      // idle | confirming | armed | countdown | update-confirming | svc-idle | svc-confirm-stop
+            countdownSecs: 60,
+            countdownHandle: null,
+            // Phase 3 - service drill-down
+            svcName: null,      // which service we're drilled into
+            logsText: '',       // last-known log content, sticky between polls
+        };
+
+        function initModal() {
+            // Close button
+            document.getElementById('modal-close').addEventListener('click', closeNodeModal);
+            // Modal-local flash close button (dismisses the in-modal alert)
+            const flashClose = document.getElementById('modal-flash-close');
+            if (flashClose) {
+                flashClose.addEventListener('click', () => setModalFlash(null));
+            }
+            // Tap-outside-to-close (only safe in idle states)
+            document.getElementById('modal-backdrop').addEventListener('click', (e) => {
+                if (e.target.id !== 'modal-backdrop') return;
+                if (modal.state !== 'idle' && modal.state !== 'svc-idle') return;
+                closeNodeModal();
+            });
+            // ESC key - same rules as tap-outside
+            document.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape') return;
+                if (!modal.open) return;
+                if (modal.state !== 'idle' && modal.state !== 'svc-idle') return;
+                closeNodeModal();
+            });
+        }
+
+        function openNodeModal(nodeName) {
+            modal.open = true;
+            modal.nodeName = nodeName;
+            modal.scrollIndex = 0;
+            modal.state = 'idle';
+            document.getElementById('modal-backdrop').classList.add('visible');
+            // Render NOW with current data, then swap polling to fast.
+            renderModalContent();
+            startPolling(MODAL_POLL_INTERVAL);
+            // Also kick an immediate refresh so we don't wait 2s for fresh data.
+            refresh();
+        }
+
+        function closeNodeModal() {
+            modal.open = false;
+            modal.nodeName = null;
+            modal.state = 'idle';
+            if (modal.countdownHandle !== null) {
+                clearInterval(modal.countdownHandle);
+                modal.countdownHandle = null;
+            }
+            // Clear any lingering flash so the next modal open starts fresh.
+            setModalFlash(null);
+            document.getElementById('modal-backdrop').classList.remove('visible');
+            startPolling(POLL_INTERVAL);
+        }
+
+        // Called every refresh cycle. If modal is open, re-render with new data.
+        // Cheap - just rebuilds the inner DOM. Skips re-render in confirm/
+        // countdown states to avoid interrupting the user flow.
+        function refreshModal() {
+            if (!modal.open) return;
+            // Re-render the idle node view OR the service-drill view. Skip
+            // confirm states (reboot/stop) and countdown - those have their
+            // own click handlers and shouldn't get yanked out from under
+            // the user mid-tap.
+            if (modal.state === 'idle' || modal.state === 'svc-idle') {
+                // For svc-idle, also pull a fresh logs payload via a
+                // separate API call (logs aren't in /system/status).
+                if (modal.state === 'svc-idle') {
+                    refreshServiceLogs();
+                }
+                renderModalContent();
+            }
+        }
+
+        async function refreshServiceLogs() {
+            if (!modal.svcName || !modal.nodeName) return;
+            const url = `/api/v1/node/${encodeURIComponent(modal.nodeName)}/service/${encodeURIComponent(modal.svcName)}/logs?lines=50`;
+            const resp = await api(url);
+            if (resp?.logs?.lines) {
+                modal.logsText = resp.logs.lines.join('\n');
+            } else if (resp?.logs?.note) {
+                modal.logsText = '(' + resp.logs.note + ')';
+            } else if (!resp) {
+                modal.logsText = '(could not fetch logs)';
+            }
+        }
+
+        function findNode(nodeName) {
+            return (window._lastStatus?.nodes || []).find(n => n.name === nodeName) || null;
+        }
+
+        function deriveState(svcStatus) {
+            // Map agent's status fields → human-readable state string for the row
+            if (!svcStatus) return ['-', 'down'];
+            if (svcStatus.library_mode) return ['Library', 'library'];
+            if (!svcStatus.running) return ['Down', 'down'];
+            const ph = svcStatus.port_health;
+            // null port_health on a running service = systemd-managed (the agent
+            // itself). port_health.ok = true means port answered. False = loading.
+            if (ph === null || ph === undefined) return ['Running', 'running'];
+            if (ph.ok) return ['Running', 'running'];
+            return ['Loading', 'loading'];
+        }
+
+        // ------------------------------------------------------------------
+        // Service-type badges - one-glance "what kind of thing is this?"
+        // Mapping (Path C dispatcher categories):
+        //   pid_file       → 📄  (classic ~/start_<name>.sh + PID file daemon)
+        //   library        → 📚  (no daemon; code imported on demand)
+        //   systemd        → 🎛️   (systemctl-managed unit)
+        //   docker_compose → 📦  (container in a compose stack)
+        // Anything else → blank (unknown / pre-Path-C agent)
+        //
+        // Returns {emoji, title, cls} - title becomes hover tooltip text,
+        // cls is the CSS hook for color theming if we want it later.
+        // ------------------------------------------------------------------
+        function serviceBadge(svcStatus) {
+            if (!svcStatus) return { emoji: '', title: '', cls: '' };
+            const t = svcStatus.service_type;
+            switch (t) {
+                case 'pid_file':
+                    return { emoji: '📄', title: 'PID-file daemon', cls: 'badge-pid' };
+                case 'library':
+                    return { emoji: '📚', title: 'Library (no daemon)', cls: 'badge-lib' };
+                case 'systemd':
+                    return { emoji: '🎛️', title: 'systemd unit', cls: 'badge-systemd' };
+                case 'docker_compose':
+                    return { emoji: '📦', title: 'Docker Compose service', cls: 'badge-docker' };
+                default:
+                    return { emoji: '', title: '', cls: '' };
+            }
+        }
+
+        function renderModalContent() {
+            const node = findNode(modal.nodeName);
+            if (!node) {
+                // Node disappeared from the cluster - RuntimeHost config change
+                // or similar. Close gracefully.
+                closeNodeModal();
+                return;
+            }
+            renderModalHeader(node);
+            renderModalBody(node);
+        }
+
+        function renderModalHeader(node) {
+            const fields = document.getElementById('modal-header-fields');
+            const ip = node.agent_node?.manifest?.ip_addresses?.[0] || '-';
+            const hostname = node.agent_node?.manifest?.hostname || node.name;
+            // Show nickname when set, otherwise fall back to the routing name.
+            // Distinct from `hostname` which is the OS-level $(hostname) and
+            // can drift from either.
+            const displayName = node.nickname && node.nickname.trim().length > 0
+                ? `${node.nickname} (${node.name})`
+                : node.name;
+            const maxTemp = node.thermal?.max_temp_c;
+            const tempStr = maxTemp != null ? `${maxTemp.toFixed(1)} °C` : '-';
+            const uptimeSec = node.agent_node?.runtime?.uptime_seconds;
+            const uptimeStr = fmtUptime(uptimeSec);
+
+            // In service drill-down, header shows hostname + service name
+            // (lighter on stats), plus we swap the close button for a Back
+            // button that returns to the node view.
+            const inSvcDrill = modal.state === 'svc-idle' || modal.state === 'svc-confirm-stop';
+
+            if (inSvcDrill && modal.svcName) {
+                fields.innerHTML = `
+                                    <div class="modal-header-field">
+                                        <div class="modal-header-label">Node</div>
+                                        <div class="modal-header-value">${escapeHtml(displayName)}</div>
+                                    </div>
+                                    <div class="modal-header-field">
+                                        <div class="modal-header-label">Service</div>
+                                        <div class="modal-header-value">${escapeHtml(modal.svcName)}</div>
+                                    </div>
+                                    <div class="modal-header-field">
+                                        <div class="modal-header-label">IP</div>
+                                        <div class="modal-header-value">${escapeHtml(ip)}</div>
+                                    </div>
+                                `;
+            } else {
+                fields.innerHTML = `
+                                    <div class="modal-header-field">
+                                        <div class="modal-header-label">Node</div>
+                                        <div class="modal-header-value">${escapeHtml(displayName)}</div>
+                                    </div>
+                                    <div class="modal-header-field">
+                                        <div class="modal-header-label">Host</div>
+                                        <div class="modal-header-value">${escapeHtml(hostname)}</div>
+                                    </div>
+                                    <div class="modal-header-field">
+                                        <div class="modal-header-label">IP</div>
+                                        <div class="modal-header-value">${escapeHtml(ip)}</div>
+                                    </div>
+                                    <div class="modal-header-field">
+                                        <div class="modal-header-label">Max temp</div>
+                                        <div class="modal-header-value">${escapeHtml(tempStr)}</div>
+                                    </div>
+                                    <div class="modal-header-field">
+                                        <div class="modal-header-label">Uptime</div>
+                                        <div class="modal-header-value">${escapeHtml(uptimeStr)}</div>
+                                    </div>
+                                `;
+            }
+
+            // Swap close-X for a back arrow when drilled into a service.
+            // The close button element is shared (#modal-close); just update
+            // its text + click handler.
+            const closeBtn = document.getElementById('modal-close');
+            if (inSvcDrill) {
+                closeBtn.textContent = '←';
+                closeBtn.setAttribute('aria-label', 'Back to node view');
+                closeBtn.onclick = () => {
+                    modal.state = 'idle';
+                    modal.svcName = null;
+                    modal.logsText = '';
+                    renderModalContent();
+                };
+            } else {
+                closeBtn.textContent = '✕';
+                closeBtn.setAttribute('aria-label', 'Close');
+                closeBtn.onclick = closeNodeModal;
+            }
+        }
+
+        function fmtUptime(secs) {
+            if (secs == null) return '-';
+            const d = Math.floor(secs / 86400);
+            const h = Math.floor((secs % 86400) / 3600);
+            const m = Math.floor((secs % 3600) / 60);
+            if (d > 0) return `${d}d ${h}h`;
+            if (h > 0) return `${h}h ${m}m`;
+            return `${m}m`;
+        }
+
+        // Inline SVG power symbol. Original used U+23FB POWER SYMBOL but that
+        // glyph isn't in every system font (notably Ubuntu 20.04's defaults
+        // on the Nano touchscreen - rendered as a tofu box with "23FB" in it).
+        // SVG works everywhere a browser renders, no font dependency.
+        //
+        // Shape: circle with a gap at top, vertical bar inside through the gap
+        //   - the universal power-button look. currentColor lets CSS color it.
+        function powerSvg() {
+            return `<svg viewBox="0 0 24 24" width="1em" height="1em"
+                                xmlns="http://www.w3.org/2000/svg"
+                                fill="none" stroke="currentColor"
+                                stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+                                aria-hidden="true">
+                                <!-- Partial circle: arc from top-right around the bottom to top-left -->
+                                <path d="M7.5 5.5 A 7.5 7.5 0 1 0 16.5 5.5" />
+                                <!-- Vertical bar through the top gap -->
+                                <line x1="12" y1="2.5" x2="12" y2="12" />
+                            </svg>`;
+        }
+
+        function renderModalBody(node) {
+            const body = document.getElementById('modal-body');
+
+            // Branch on state. confirming/armed/countdown each get distinct UI.
+            if (modal.state === 'confirming' || modal.state === 'armed') {
+                renderConfirmBody(body, node);
+                return;
+            }
+            if (modal.state === 'update-confirming') {
+                renderUpdateConfirmBody(body, node);
+                return;
+            }
+            if (modal.state === 'countdown') {
+                renderCountdownBody(body, node);
+                return;
+            }
+            if (modal.state === 'svc-idle' || modal.state === 'svc-confirm-stop') {
+                renderServiceDrillBody(body, node);
+                return;
+            }
+
+            // Default idle: 3-column layout (svc list, scroll, reboot)
+            const svcNames = node.installed_services || [];
+            // Row height must match CSS - the touchscreen media query swaps it
+            // from 64px (desktop/regular) to 56px (max-height: 400px). Read
+            // matchMedia so the rows-visible calc is correct on both.
+            const rowHeight = window.matchMedia('(max-height: 400px)').matches ? 56 : 64;
+            // Body height minus header (computed elsewhere); we cap rows visible
+            // to whatever fits. ~500px usable → ~9 rows. We'll compute properly:
+            const bodyHeight = body.getBoundingClientRect().height || 500;
+            const headerHeight = 33; // .modal-svc-header in CSS
+            modal.rowsVisible = Math.max(1, Math.floor((bodyHeight - headerHeight) / rowHeight));
+            const maxScroll = Math.max(0, svcNames.length - modal.rowsVisible);
+            modal.scrollIndex = Math.min(modal.scrollIndex, maxScroll);
+
+            const visible = svcNames.slice(modal.scrollIndex, modal.scrollIndex + modal.rowsVisible);
+
+            let rowsHtml = '';
+            for (const svcName of visible) {
+                const svcStatus = node.services_detail?.[svcName]?.status;
+                const mem = svcStatus?.memory_mb;
+                const cpu = svcStatus?.cpu_percent;
+                const pid = svcStatus?.pid;
+                const [stateLabel, stateCls] = deriveState(svcStatus);
+                const badge = serviceBadge(svcStatus);
+
+                rowsHtml += `
+                                    <div class="modal-svc-row" data-svc="${escapeHtml(svcName)}">
+                                        <div class="name">
+                                            ${badge.emoji ? `<span class="svc-badge ${badge.cls}" title="${escapeHtml(badge.title)}">${badge.emoji}</span>` : ''}
+                                            ${escapeHtml(svcName)}
+                                        </div>
+                                        <div class="num">${fmtBytes(mem)}</div>
+                                        <div class="num">${cpu != null ? cpu.toFixed(1) + ' %' : '-'}</div>
+                                        <div class="num">${pid != null ? pid : '-'}</div>
+                                        <div class="state ${stateCls}">${stateLabel}</div>
+                                    </div>
+                                `;
+            }
+
+            // Scroll button enable/disable
+            const canUp = modal.scrollIndex > 0;
+            const canDown = modal.scrollIndex < maxScroll;
+
+            // Thumb position calculation. The thumb fills the proportion of the
+            // list that's currently visible, positioned by scroll index.
+            let thumbHtml = '';
+            if (svcNames.length > 0) {
+                const visibleFrac = Math.min(1, modal.rowsVisible / svcNames.length);
+                const topFrac = svcNames.length > modal.rowsVisible
+                    ? modal.scrollIndex / svcNames.length
+                    : 0;
+                thumbHtml = `<div class="modal-scroll-thumb-bar"
+                                    style="top: ${(topFrac * 100).toFixed(1)}%; height: ${(visibleFrac * 100).toFixed(1)}%;"></div>`;
+            }
+
+            body.innerHTML = `
+                                <div class="modal-svc-list">
+                                    <div class="modal-svc-header">
+                                        <div>Service</div>
+                                        <div>Memory</div>
+                                        <div>CPU</div>
+                                        <div>PID</div>
+                                        <div>State</div>
+                                    </div>
+                                    <div class="modal-svc-rows" id="modal-svc-rows">${rowsHtml}</div>
+                                </div>
+                                <div class="modal-scroll">
+                                    <button class="modal-scroll-btn" id="modal-scroll-up" ${canUp ? '' : 'disabled'}>▲</button>
+                                    <div class="modal-scroll-thumb">${thumbHtml}</div>
+                                    <button class="modal-scroll-btn" id="modal-scroll-down" ${canDown ? '' : 'disabled'}>▼</button>
+                                </div>
+                                <div class="modal-actions-col">
+                                    <div class="modal-update-node" id="modal-update-node" role="button" tabindex="0">
+                                        <div class="modal-update-node-icon">↑</div>
+                                        <div class="modal-update-node-label">Update Node</div>
+                                    </div>
+                                    <div class="modal-reboot" id="modal-reboot" role="button" tabindex="0">
+                                        <div class="modal-reboot-icon">${powerSvg()}</div>
+                                        <div class="modal-reboot-label">Reboot Node</div>
+                                    </div>
+                                </div>
+                            `;
+
+            // Wire scroll buttons
+            document.getElementById('modal-scroll-up').addEventListener('click', () => {
+                modal.scrollIndex = Math.max(0, modal.scrollIndex - 1);
+                renderModalContent();
+            });
+            document.getElementById('modal-scroll-down').addEventListener('click', () => {
+                modal.scrollIndex = Math.min(maxScroll, modal.scrollIndex + 1);
+                renderModalContent();
+            });
+
+            // Wire update button - transitions to update-confirming
+            // (was: fire directly, but a misplaced fat-finger triggers a
+            // ~30s tarball extract + agent restart. Confirmation step now
+            // matches the reboot button's pattern.)
+            document.getElementById('modal-update-node').addEventListener('click', () => {
+                modal.state = 'update-confirming';
+                renderModalContent();
+            });
+
+            // Wire reboot button - transitions to confirming
+            document.getElementById('modal-reboot').addEventListener('click', () => {
+                modal.state = 'confirming';
+                renderModalContent();
+            });
+
+            // Phase 3: service rows are tappable, open the service drill-down.
+            for (const row of document.querySelectorAll('.modal-svc-row')) {
+                row.addEventListener('click', () => {
+                    const svc = row.dataset.svc;
+                    openServiceDrill(svc);
+                });
+            }
+        }
+
+        function renderConfirmBody(body, node) {
+            const armed = modal.state === 'armed';
+            // Confirm: spans svc-list + scroll columns (2 of 3). Reboot column
+            // stays as its own column on the right but greyed/disabled until
+            // "Yes" is tapped.
+            body.innerHTML = `
+                                <div class="modal-confirm">
+                                    <div class="modal-confirm-title">
+                                        Reboot <strong>${escapeHtml(node.name)}</strong>?
+                                    </div>
+                                    <div class="modal-confirm-buttons">
+                                        <button class="modal-confirm-btn yes" id="modal-confirm-yes" ${armed ? 'disabled' : ''}>Yes</button>
+                                        <button class="modal-confirm-btn" id="modal-confirm-no" ${armed ? 'disabled' : ''}>No</button>
+                                    </div>
+                                </div>
+                                <div class="modal-reboot ${armed ? 'armed-ready' : 'armed-pending'}" id="modal-reboot-armed" role="button" tabindex="0">
+                                    <div class="modal-reboot-icon">${powerSvg()}</div>
+                                    <div class="modal-reboot-label">
+                                        ${armed ? 'Reboot Now' : 'Confirm First'}
+                                    </div>
+                                </div>
+                            `;
+
+            // No → back to idle (per Q1: B - stays on node panel, doesn't close modal)
+            if (!armed) {
+                document.getElementById('modal-confirm-no').addEventListener('click', () => {
+                    modal.state = 'idle';
+                    renderModalContent();
+                });
+                document.getElementById('modal-confirm-yes').addEventListener('click', () => {
+                    modal.state = 'armed';
+                    renderModalContent();
+                });
+            } else {
+                // Armed - the right column is the active fire button
+                document.getElementById('modal-reboot-armed').addEventListener('click', () => {
+                    fireReboot(node.name);
+                });
+            }
+        }
+
+        // ----------------------------------------------------------------------
+        // Update-confirm body: "Update <node>?  Yes / No"
+        //
+        // Simpler than reboot's confirm flow - no countdown, no armed state,
+        // no auto-cancel window. Update is non-destructive (the agent
+        // gracefully restarts after extracting the new tarball), so we don't
+        // need the safety-belt confirmations reboot has.
+        //
+        // Yes  → fireAgentUpdate(node.name), modal stays open, flash shows result
+        // No   → back to idle (modal stays open, no action)
+        // ----------------------------------------------------------------------
+        function renderUpdateConfirmBody(body, node) {
+            // Same layout shape as renderConfirmBody so the visual transition
+            // feels consistent: confirm question + Yes/No in the left two
+            // columns, action button highlighted in the right column.
+            body.innerHTML = `
+                                <div class="modal-confirm">
+                                    <div class="modal-confirm-title">
+                                        Update agent on <strong>${escapeHtml(node.name)}</strong>?
+                                    </div>
+                                    <div class="modal-confirm-subtitle">
+                                        The agent will restart after the new code is extracted.
+                                    </div>
+                                    <div class="modal-confirm-buttons">
+                                        <button class="modal-confirm-btn yes" id="modal-update-confirm-yes">Yes</button>
+                                        <button class="modal-confirm-btn" id="modal-update-confirm-no">No</button>
+                                    </div>
+                                </div>
+                                <div class="modal-update-node armed-ready" id="modal-update-armed" role="button" tabindex="0">
+                                    <div class="modal-update-node-icon">↑</div>
+                                    <div class="modal-update-node-label">Update Node</div>
+                                </div>
+                            `;
+
+            document.getElementById('modal-update-confirm-no').addEventListener('click', () => {
+                modal.state = 'idle';
+                renderModalContent();
+            });
+            document.getElementById('modal-update-confirm-yes').addEventListener('click', () => {
+                // Drop back to idle BEFORE firing, so a long-running update
+                // doesn't strand the confirm UI. The flash will surface the
+                // result when it lands.
+                modal.state = 'idle';
+                renderModalContent();
+                fireAgentUpdate(node.name);
+            });
+            // Right-column "Update Node" tap is also a yes (fingers gravitate
+            // there since that's where the button "lives" structurally).
+            document.getElementById('modal-update-armed').addEventListener('click', () => {
+                modal.state = 'idle';
+                renderModalContent();
+                fireAgentUpdate(node.name);
+            });
+        }
+
+        function renderCountdownBody(body, node) {
+            body.innerHTML = `
+                                <div class="modal-countdown">
+                                    <div class="modal-countdown-title">Reboot scheduled - <strong>${escapeHtml(node.name)}</strong></div>
+                                    <div class="modal-countdown-secs" id="modal-countdown-secs">${modal.countdownSecs}</div>
+                                    <button class="modal-countdown-cancel" id="modal-countdown-cancel">Cancel Reboot</button>
+                                </div>
+                            `;
+            document.getElementById('modal-countdown-cancel').addEventListener('click', () => {
+                cancelReboot(node.name);
+            });
+        }
+
+        async function fireReboot(nodeName) {
+            // POST /api/v1/system/reboot/{node} - schedules shutdown -r +1
+            const resp = await api(`/api/v1/system/reboot/${encodeURIComponent(nodeName)}`, {
+                method: 'POST',
+                json: { delay_minutes: 1 },
+            });
+            if (!resp || resp.scheduled === false) {
+                // Failure - surface error to the user, drop back to idle state
+                banner(`Reboot failed: ${resp?.error || 'no response'}${resp?.hint ? ' (' + resp.hint + ')' : ''}`);
+                modal.state = 'idle';
+                renderModalContent();
+                return;
+            }
+            // Success - switch to countdown state, tick every second
+            modal.state = 'countdown';
+            modal.countdownSecs = 60;
+            renderModalContent();
+            if (modal.countdownHandle !== null) clearInterval(modal.countdownHandle);
+            modal.countdownHandle = setInterval(() => {
+                modal.countdownSecs--;
+                const el = document.getElementById('modal-countdown-secs');
+                if (el) el.textContent = Math.max(0, modal.countdownSecs);
+                if (modal.countdownSecs <= 0) {
+                    // Time's up - the node should be going down. Stop the timer,
+                    // close the modal so the dashboard's normal "node went offline"
+                    // path takes over.
+                    clearInterval(modal.countdownHandle);
+                    modal.countdownHandle = null;
+                    closeNodeModal();
+                }
+            }, 1000);
+        }
+
+        async function cancelReboot(nodeName) {
+            const resp = await api(`/api/v1/system/reboot/${encodeURIComponent(nodeName)}/cancel`, {
+                method: 'POST',
+            });
+            if (!resp || resp.cancelled === false) {
+                banner(`Cancel failed: ${resp?.error || 'no response'}`);
+                // Stay in countdown - they can try again
+                return;
+            }
+            // Cancelled successfully. Stop timer, return to idle node view.
+            if (modal.countdownHandle !== null) {
+                clearInterval(modal.countdownHandle);
+                modal.countdownHandle = null;
+            }
+            modal.state = 'idle';
+            renderModalContent();
+        }
+
+        // ----------------------------------------------------------------------
+        // Phase 3 - service drill-down
+        //
+        // Opened from a tap on a service row in the Phase 2 node view.
+        // Re-uses the same modal frame; only the body content changes.
+        // Header swaps to show service name + back-arrow button.
+        // ----------------------------------------------------------------------
+        async function openServiceDrill(svcName) {
+            modal.state = 'svc-idle';
+            modal.svcName = svcName;
+            modal.logsText = '(loading…)';
+            renderModalContent();
+            // Kick an immediate log fetch - don't wait for the 2s poll
+            await refreshServiceLogs();
+            renderModalContent();
+        }
+
+        function renderServiceDrillBody(body, node) {
+            const svcStatus = node.services_detail?.[modal.svcName]?.status;
+            const svcManifest = node.services_detail?.[modal.svcName]?.manifest;
+
+            const running = svcStatus?.running === true;
+            const libMode = svcStatus?.library_mode === true;
+            const [stateLabel, stateCls] = deriveState(svcStatus);
+
+            // Build stats row
+            const memMb = svcStatus?.memory_mb;
+            const cpuPct = svcStatus?.cpu_percent;
+            const pid = svcStatus?.pid;
+            const uptimeSec = svcStatus?.uptime_seconds;
+            const port = svcManifest?.port;
+
+            // Action button availability:
+            //   Library-mode services have no lifecycle scripts - no action buttons.
+            //   Running services can be Stopped or Restarted.
+            //   Stopped services can be Started.
+            const canStart = !libMode && !running;
+            const canStop = !libMode && running;
+            const canRestart = !libMode && running;
+
+            const confirmingStop = modal.state === 'svc-confirm-stop';
+
+            // The right column houses the action buttons - same column position
+            // as the reboot button in the Phase 2 view, so spatial muscle memory
+            // carries over.
+            body.innerHTML = `
+                                <div class="svc-drill-main">
+                                    <div class="svc-drill-stats">
+                                        <div class="svc-stat-cell"><div class="svc-stat-label">State</div><div class="svc-stat-value state ${stateCls}">${stateLabel}</div></div>
+                                        <div class="svc-stat-cell"><div class="svc-stat-label">Memory</div><div class="svc-stat-value">${fmtBytes(memMb)}</div></div>
+                                        <div class="svc-stat-cell"><div class="svc-stat-label">CPU</div><div class="svc-stat-value">${cpuPct != null ? cpuPct.toFixed(1) + ' %' : '-'}</div></div>
+                                        <div class="svc-stat-cell"><div class="svc-stat-label">PID</div><div class="svc-stat-value">${pid != null ? pid : '-'}</div></div>
+                                        <div class="svc-stat-cell"><div class="svc-stat-label">Uptime</div><div class="svc-stat-value">${fmtUptime(uptimeSec)}</div></div>
+                                        <div class="svc-stat-cell"><div class="svc-stat-label">Port</div><div class="svc-stat-value">${port ?? '-'}</div></div>
+                                    </div>
+                                    <div class="svc-drill-logs-wrap">
+                                        <div class="svc-drill-logs-header">
+                                            Logs · last 50 lines
+                                            ${svcManifest?.log_path ? `<span class="svc-drill-logs-path">${escapeHtml(svcManifest.log_path)}</span>` : ''}
+                                        </div>
+                                        <pre class="svc-drill-logs" id="svc-drill-logs">${escapeHtml(modal.logsText || '(no logs)')}</pre>
+                                    </div>
+                                </div>
+                                <div class="svc-drill-actions">
+                                    ${confirmingStop ? renderStopConfirmInline() : renderActionButtons(canStart, canStop, canRestart, libMode)}
+                                </div>
+                            `;
+
+            // Auto-scroll the logs pane to bottom (latest line) so the most
+            // recent activity is visible without manual scrolling.
+            const logsEl = document.getElementById('svc-drill-logs');
+            if (logsEl) logsEl.scrollTop = logsEl.scrollHeight;
+
+            // Wire action button click handlers
+            if (!confirmingStop) {
+                if (canStart) document.getElementById('svc-action-start')?.addEventListener('click', () => fireServiceAction('start'));
+                if (canStop) document.getElementById('svc-action-stop')?.addEventListener('click', () => { modal.state = 'svc-confirm-stop'; renderModalContent(); });
+                if (canRestart) document.getElementById('svc-action-restart')?.addEventListener('click', () => fireServiceAction('restart'));
+            } else {
+                document.getElementById('svc-stop-yes')?.addEventListener('click', () => fireServiceAction('stop'));
+                document.getElementById('svc-stop-no')?.addEventListener('click', () => { modal.state = 'svc-idle'; renderModalContent(); });
+            }
+        }
+
+        function renderActionButtons(canStart, canStop, canRestart, libMode) {
+            if (libMode) {
+                return `<div class="svc-drill-libnote">Library-mode service. No daemon to control.</div>`;
+            }
+            return `
+                                <button class="svc-action-btn ${canStart ? '' : 'disabled'}" id="svc-action-start" ${canStart ? '' : 'disabled'}>▶ Start</button>
+                                <button class="svc-action-btn danger ${canStop ? '' : 'disabled'}" id="svc-action-stop" ${canStop ? '' : 'disabled'}>■ Stop</button>
+                                <button class="svc-action-btn ${canRestart ? '' : 'disabled'}" id="svc-action-restart" ${canRestart ? '' : 'disabled'}>↻ Restart</button>
+                            `;
+        }
+
+        function renderStopConfirmInline() {
+            return `
+                                <div class="svc-stop-confirm">
+                                    <div class="svc-stop-confirm-title">Stop <strong>${escapeHtml(modal.svcName)}</strong>?</div>
+                                    <button class="svc-action-btn danger" id="svc-stop-yes">Yes, stop</button>
+                                    <button class="svc-action-btn" id="svc-stop-no">No</button>
+                                </div>
+                            `;
+        }
+
+        async function fireServiceAction(action) {
+            const url = `/api/v1/node/${encodeURIComponent(modal.nodeName)}/service/${encodeURIComponent(modal.svcName)}/${action}`;
+            const resp = await api(url, { method: 'POST' });
+            if (!resp || resp.result?.ok === false) {
+                banner(`Action '${action}' failed: ${resp?.result?.error || 'no response'}`);
+            }
+            // Reset to svc-idle (in case we were in svc-confirm-stop) and
+            // re-render. The next 2s poll will pick up the new state from
+            // /system/status; for responsiveness, also force an immediate
+            // refresh now.
+            modal.state = 'svc-idle';
+            await refresh();
+            await refreshServiceLogs();
+            renderModalContent();
+        }
+
+        function fmtBytes(mb) {
+            if (mb == null) return '-';
+            if (mb >= 1024) return (mb / 1024).toFixed(1) + ' Gb';
+            return mb + ' Mb';
+        }
+
+        function fmtTime(iso) {
+            if (!iso) return '-';
+            const t = new Date(iso);
+            if (isNaN(t)) return '-';
+            const secs = Math.floor((Date.now() - t) / 1000);
+            if (secs < 60) return secs + 's ago';
+            if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+            return Math.floor(secs / 3600) + 'h ago';
+        }
+
+        // ----------------------------------------------------------------------
+        // RENDER - turns the /api/v1/system/status payload into DOM.
+        //
+        // The endpoint returns:
+        //   { nodes: [ { name, online, installed_services, agent_node, ... } ],
+        //     node_count, online_count }
+        //
+        // agent_node.runtime has memory_mb_total, memory_mb_available, load_avg.
+        // agent_node.manifest has hostname + ip_addresses.
+        // We DON'T currently get per-service memory or temp from the agent.
+        // Filed for an agent-side enhancement (next session). For now we render
+        // what's there and leave clear placeholders for what's not.
+        // ----------------------------------------------------------------------
+        function renderNode(node) {
+            const card = document.createElement('div');
+            card.className = 'node' + (node.online ? '' : ' offline');
+
+            const ip = node.agent_node?.manifest?.ip_addresses?.[0] || '-';
+            const hostname = node.agent_node?.manifest?.hostname || node.name;
+            const hostBadge = node.is_host ? '🏠 -' : '';
+            // Prefer nickname when set (the Sharpie-on-the-heatsink display
+            // name). Falls back to the routing name. Original technical name
+            // ALWAYS appears in the subline so you can match the card to the
+            // YAML when debugging.
+            const displayName = node.nickname && node.nickname.trim().length > 0
+                ? node.nickname
+                : node.name;
+            const thermal = node.thermal;
+            let headerDangerClass = '';
+            if (thermal && thermal.available && thermal.max_temp_c != null && thermal.max_temp_c >= TEMP_DANGER_C) {
+                headerDangerClass = ' node-header-danger';
+            }
+
+            const header = document.createElement('div');
+            header.className = headerDangerClass.trim();
+            header.innerHTML = `
+                        <div class="node-name">${hostBadge} ${escapeHtml(displayName)}</div>
+                        <div class="node-ip">${escapeHtml(node.name)} · ${escapeHtml(hostname)} · ${escapeHtml(ip)}</div>
+                      `;
+            card.appendChild(header);
+
+            // Service list. We need the per-service status data from a SECOND endpoint
+            // (the cluster /api/v1/system/status only gives us names, not statuses).
+            // Phase 1 simplification: just name + symbol. Memory column comes in
+            // Phase 1.5 once we wire up per-node /api/v1/system/services calls.
+            const list = document.createElement('div');
+            list.className = 'svc-list';
+
+            if (!node.online) {
+                list.innerHTML = `<div class="svc-empty">unreachable</div>`;
+            } else if (!node.installed_services || node.installed_services.length === 0) {
+                list.innerHTML = `<div class="svc-empty">no services installed</div>`;
+            } else {
+                // Roll all searxng-* services into one summary row on the card.
+                // Worst-case status: down > warn > ok, mirroring symbolFor priority.
+                const STATUS_RANK = { down: 2, warn: 1, ok: 0 };
+                let searxngRolled = false;
+                let searxngWorstCls = 'ok';
+                let searxngWorstSym = '●';
+                let searxngTotalMem = 0;
+                let searxngHasMem = false;
+
+                for (const svcName of node.installed_services) {
+                    if (!svcName.toLowerCase().includes('searxng')) continue;
+                    const svcStatus = node.services?.[svcName]?.status;
+                    const [sym, cls] = symbolFor(svcStatus);
+                    if ((STATUS_RANK[cls] ?? 0) > (STATUS_RANK[searxngWorstCls] ?? 0)) {
+                        searxngWorstCls = cls;
+                        searxngWorstSym = sym;
+                    }
+                    const mem = svcStatus?.memory_mb;
+                    if (mem != null) { searxngTotalMem += mem; searxngHasMem = true; }
+                    searxngRolled = true;
+                }
+
+                for (const svcName of node.installed_services) {
+                    if (svcName.toLowerCase().includes('searxng')) {
+                        // Emit the single rolled-up row once, on first encounter
+                        if (searxngRolled) {
+                            const badge = serviceBadge({ service_type: 'docker_compose' });
+                            list.innerHTML += `
+                            <div class="svc-name">${badge.emoji ? `<span class="svc-badge ${badge.cls}" title="${escapeHtml(badge.title)}">${badge.emoji}</span>` : ''}searxng</div>
+                            <div class="svc-mem">${searxngHasMem ? fmtBytes(searxngTotalMem) : '-'}</div>
+                            <div class="svc-stat ${searxngWorstCls}">${searxngWorstSym}</div>
+                          `;
+                            searxngRolled = false;
+                        }
+                        continue;
+                    }
+                    const svcStatus = node.services?.[svcName]?.status;
+                    const [sym, cls] = symbolFor(svcStatus);
+                    const mem = svcStatus?.memory_mb;
+                    const badge = serviceBadge(svcStatus);
+                    list.innerHTML += `
+                            <div class="svc-name">${badge.emoji ? `<span class="svc-badge ${badge.cls}" title="${escapeHtml(badge.title)}">${badge.emoji}</span>` : ''}${escapeHtml(svcName)}</div>
+                            <div class="svc-mem">${fmtBytes(mem)}</div>
+                            <div class="svc-stat ${cls}">${sym}</div>
+                          `;
+                }
+            }
+            card.appendChild(list);
+
+            // Footer - temp + memory total
+            const footer = document.createElement('div');
+            footer.className = 'node-footer';
+
+            const rt = node.agent_node?.runtime;
+            const memTotal = rt?.memory_mb_total;
+            const memAvail = rt?.memory_mb_available;
+            const memUsedGb = (memTotal != null && memAvail != null)
+                ? ((memTotal - memAvail) / 1024).toFixed(1) : '-';
+            const memTotalGb = memTotal != null ? (memTotal / 1024).toFixed(0) : '-';
+
+            // Temperature comes from the agent's /api/v1/system/thermal endpoint,
+            // embedded in the per-node payload by RuntimeHost. `available: false`
+            // means the host has no /sys/class/thermal (VMs, weird hardware).
+            // (Reusing `thermal` declared at the top of this function.)
+            let tempDisplay = '-';
+            let tempClass = '';
+            if (thermal && thermal.available && thermal.max_temp_c != null) {
+                const tc = thermal.max_temp_c;
+                tempDisplay = tc.toFixed(0) + ' °C';
+                if (tc >= TEMP_DANGER_C) tempClass = 'temp-danger';
+                else if (tc >= TEMP_HOT_C) tempClass = 'temp-hot';
+            } else if (thermal && !thermal.available) {
+                tempDisplay = 'n/a';
+            }
+
+            footer.innerHTML = `
+                        <div class="row"><span>temp</span><span class="${tempClass}">${tempDisplay}</span></div>
+                        <div class="row"><span>mem</span><span>${memUsedGb} / ${memTotalGb} Gb</span></div>
+                      `;
+            card.appendChild(footer);
+
+            // Phase 2 - tap card to open the drill-down modal. Only enabled
+            // for online nodes (offline node has no data to drill into; tap
+            // would just show empty rows).
+            if (node.online) {
+                card.addEventListener('click', () => openNodeModal(node.name));
+            }
+
+            return card;
+        }
+
+        function escapeHtml(s) {
+            return String(s ?? '').replace(/[&<>"']/g, ch => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[ch]));
+        }
+
+        // ----------------------------------------------------------------------
+        // REFRESH CYCLE - hits /api/v1/system/status, then for each online node
+        // hits /api/v1/cluster/capabilities to populate per-service status.
+        // ----------------------------------------------------------------------
+        async function refresh() {
+            const status = await api('/api/v1/system/status');
+            if (!status) {
+                setLed('down', 'unreachable');
+                return;
+            }
+
+            // Hit capabilities endpoint to know which services exist where
+            const caps = await api('/api/v1/cluster/capabilities');
+
+            // RuntimeHost's /system/status now embeds per-node `services_detail`
+            // straight from each node's own agent - no need to round-trip back
+            // for individual /service/{name}/status calls. Stitch the detail
+            // block into the shape the renderer expects: node.services is keyed
+            // by svc name, each value is {status: {...}}.
+            //
+            // (Previous version called /api/v1/service/{name}/status per service
+            // per node - but that endpoint cluster-routes to the preferred node,
+            // so e.g. xavier16gb's "agent" call would resolve to xavier32gb and
+            // the result got tossed because r.node !== node.name. Bug: every
+            // non-preferred node showed empty service rows.)
+            for (const node of (status.nodes || [])) {
+                const detail = node.services_detail || {};
+                node.services = {};
+                for (const [svcName, svcData] of Object.entries(detail)) {
+                    // svcData is {manifest, status} - renderNode expects
+                    // node.services[name].status, so adapt the shape.
+                    node.services[svcName] = { status: svcData.status };
+                }
+            }
+
+            renderGrid(status);
+            renderGaps(status, caps);
+            setOverallLed(status, caps);
+            setLastRefresh();
+
+            // Stash the latest status so the modal's findNode() can use it,
+            // then re-render the modal if it's open (idle state only -
+            // confirm/countdown skip the refresh to avoid disrupting flow).
+            window._lastStatus = status;
+            refreshModal();
+        }
+
+        function renderGrid(status) {
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            for (const node of (status.nodes || [])) {
+                grid.appendChild(renderNode(node));
+            }
+            // After the node cards, append the actions column - same grid slot
+            // shape as a card, but contains the settings/refresh buttons. Put
+            // here so it always appears at the end of the row, regardless of
+            // how many nodes the cluster has.
+            grid.appendChild(renderActionsCard());
+        }
+
+        // Action column - the 5th (or Nth+1) item in the grid, sized like a
+        // card. Two big buttons stacked vertically with space-between so they
+        // hug the top and bottom edges of the column.
+        function renderActionsCard() {
+            const actions = document.createElement('div');
+            actions.className = 'actions-card';
+
+            const settingsBtn = document.createElement('button');
+            settingsBtn.className = 'actions-btn';
+            settingsBtn.id = 'actions-settings';
+            settingsBtn.innerHTML = '<span class="actions-icon">⚙</span><span class="actions-label">settings</span>';
+            settingsBtn.addEventListener('click', openSettingsModal);
+
+            const refreshBtn = document.createElement('button');
+            refreshBtn.className = 'actions-btn';
+            refreshBtn.id = 'actions-refresh';
+            refreshBtn.title = 'Force eager rediscovery';
+            refreshBtn.innerHTML = '<span class="actions-icon">↻</span><span class="actions-label">refresh</span>';
+            refreshBtn.addEventListener('click', async () => {
+                // Same logic as the old top-bar refresh button: force a fresh
+                // cluster discovery then re-run a poll. Briefly disable to
+                // prevent rapid-fire taps during the round-trip.
+                refreshBtn.disabled = true;
+                try {
+                    await api('/api/v1/cluster/refresh', { method: 'POST' });
+                    await refresh();
+                } finally {
+                    refreshBtn.disabled = false;
+                }
+            });
+
+            actions.appendChild(settingsBtn);
+            actions.appendChild(refreshBtn);
+            return actions;
+        }
+
+        function renderGaps(status, caps) {
+            // A "gap" = a capability that's listed in the cluster.nodes[].preferred_for
+            // somewhere but isn't currently available on any online node. We don't
+            // get preferred_for from the API yet (it's RuntimeHost-side config),
+            // so for Phase 1 we show "configured but not online":
+            //   - any node in the cluster that's offline
+            // Future: hit a future /api/v1/cluster/config endpoint that exposes the
+            // preferred_for map so we can compute true capability gaps.
+
+            const offlineNodes = (status.nodes || []).filter(n => !n.online).map(n => n.name);
+            const gapsEl = document.getElementById('gaps');
+            const listEl = document.getElementById('gap-list');
+
+            if (offlineNodes.length === 0) {
+                gapsEl.style.display = 'none';
+                return;
+            }
+            gapsEl.style.display = 'block';
+            listEl.textContent = `Offline nodes: ${offlineNodes.join(', ')}`;
+        }
+
+        function setOverallLed(status, caps) {
+            // 4-state rollup logic from the design:
+            //   green  = every node online, every reachable service healthy
+            //   yellow = some service degraded but cluster still functional
+            //   orange = at least one capability has no available node
+            //   red    = at least one node unreachable
+            const nodes = status.nodes || [];
+            const offlineCount = nodes.filter(n => !n.online).length;
+
+            if (offlineCount > 0) {
+                setLed('down', `${offlineCount} node(s) offline`);
+                return;
+            }
+
+            // Check if any service across all nodes is degraded
+            let degraded = 0, total = 0;
+            for (const node of nodes) {
+                for (const svcName of (node.installed_services || [])) {
+                    total++;
+                    const ss = node.services?.[svcName]?.status;
+                    const [, cls] = symbolFor(ss);
+                    if (cls !== 'ok') degraded++;
+                }
+            }
+
+            if (degraded > 0) setLed('warn', `${degraded}/${total} services degraded`);
+            else setLed('ok', `${total} services healthy`);
+        }
+
+        function setLed(cls, text) {
+            const led = document.getElementById('led');
+            led.className = 'led ' + cls;
+            document.getElementById('led-text').textContent = text;
+        }
+
+        function setLastRefresh() {
+            document.getElementById('last-refresh').textContent =
+                'refreshed ' + new Date().toLocaleTimeString();
+        }
+
+        // ----------------------------------------------------------------------
+        // ----------------------------------------------------------------------
+        // AGENT UPDATE
+        //
+        // Called with a nodeName to target one node, or null to broadcast to all.
+        // For single-node: POST /api/v1/node/{node}/agent-update
+        // For broadcast:   POST /api/v1/system/agent-update
+        // ----------------------------------------------------------------------
+        async function fireAgentUpdate(nodeName) {
+            const isBroadcast = nodeName == null;
+            const url = isBroadcast
+                ? '/api/v1/system/agent-update'
+                : `/api/v1/node/${encodeURIComponent(nodeName)}/agent-update`;
+
+            // For the single-node path, mark the button busy while the request
+            // is in flight (the network round-trip includes tarball transfer).
+            const updateBtn = document.getElementById('modal-update-node');
+            if (updateBtn) {
+                updateBtn.classList.add('updating');
+                updateBtn.style.pointerEvents = 'none';
+            }
+
+            // For the settings broadcast path, show a spinner-ish label.
+            const broadcastBtn = document.getElementById('cfg-update-nodes');
+            const resultEl = document.getElementById('cfg-update-result');
+            if (isBroadcast && broadcastBtn) {
+                broadcastBtn.disabled = true;
+                broadcastBtn.textContent = 'updating…';
+                if (resultEl) { resultEl.style.display = 'none'; resultEl.textContent = ''; }
+            }
+
+            const resp = await api(url, { method: 'POST' });
+
+            // Restore single-node button
+            if (updateBtn) {
+                updateBtn.classList.remove('updating');
+                updateBtn.style.pointerEvents = '';
+            }
+
+            if (isBroadcast && broadcastBtn) {
+                broadcastBtn.disabled = false;
+                broadcastBtn.textContent = 'update all nodes';
+            }
+
+            if (!resp) {
+                if (isBroadcast && resultEl) {
+                    resultEl.className = 'update-result err';
+                    resultEl.textContent = 'Update failed: no response from RuntimeHost.';
+                    resultEl.style.display = '';
+                } else {
+                    // Per-node failure → modal-local flash, NOT cluster banner.
+                    // The user fired this from a node modal; they need to see
+                    // the result without having to close the modal first.
+                    setModalFlash('Agent update failed: no response from RuntimeHost.', 'err');
+                }
+                return;
+            }
+
+            if (isBroadcast) {
+                // Broadcast response: { results: [ { node, ok, message, error }, ... ] }
+                const results = resp.results || [];
+                const lines = results.map(r =>
+                    r.ok ? `✓ ${r.node}: ${r.message || 'ok'}` : `✗ ${r.node}: ${r.error || r.message || 'failed'}`
+                );
+                const allOk = results.every(r => r.ok);
+                if (resultEl) {
+                    resultEl.className = `update-result ${allOk ? 'ok' : 'err'}`;
+                    resultEl.textContent = lines.join('\n') || (resp.error ? `Error: ${resp.error}` : 'No nodes updated.');
+                    resultEl.style.display = '';
+                }
+            } else {
+                // Single-node response: { ok, message, error }
+                // Both success and failure surface in the modal flash so the
+                // user gets feedback in the same place they triggered the action.
+                if (resp.ok) {
+                    setModalFlash(`Update sent to ${nodeName} - agent will restart shortly.`, 'ok');
+                } else {
+                    setModalFlash(`Update failed on ${nodeName}: ${resp.error || resp.message || 'unknown error'}`, 'err');
+                }
+            }
+        }
+
+        // ----------------------------------------------------------------------
+        // SETTINGS MODAL
+        //
+        // The settings panel was a slide-down strip below the header. With
+        // refresh+settings buttons now living in the grid's actions column,
+        // the slide-down was visually disconnected from where you tapped.
+        // Promote it to a modal so it appears centered, consistent with the
+        // node drill-down pattern.
+        // ----------------------------------------------------------------------
+        function initSettings() {
+            const cfg = loadCfg();
+            document.getElementById('cfg-url').value = cfg.url;
+            document.getElementById('cfg-token').value = cfg.token;
+
+            // Close X
+            document.getElementById('settings-close').addEventListener('click', closeSettingsModal);
+
+            // Tap-outside-to-close
+            document.getElementById('settings-backdrop').addEventListener('click', (e) => {
+                if (e.target.id === 'settings-backdrop') closeSettingsModal();
+            });
+
+            // ESC closes (no destructive op concerns here - it's a form)
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && isSettingsOpen()) closeSettingsModal();
+            });
+
+            // Save button: persist + close + force a refresh so the new
+            // URL/token take effect immediately
+            document.getElementById('cfg-save').addEventListener('click', () => {
+                const url = document.getElementById('cfg-url').value.trim();
+                const token = document.getElementById('cfg-token').value.trim();
+                saveCfg(url, token);
+                closeSettingsModal();
+                refresh();
+            });
+
+            // Update all nodes: POST broadcast agent-update endpoint
+            document.getElementById('cfg-update-nodes').addEventListener('click', () => {
+                fireAgentUpdate(null);
+            });
+        }
+
+        function openSettingsModal() {
+            // Re-sync the inputs in case localStorage was edited externally
+            // since the last open. Cheap and prevents stale display.
+            const cfg = loadCfg();
+            document.getElementById('cfg-url').value = cfg.url;
+            document.getElementById('cfg-token').value = cfg.token;
+            document.getElementById('settings-backdrop').classList.add('visible');
+        }
+
+        function closeSettingsModal() {
+            document.getElementById('settings-backdrop').classList.remove('visible');
+        }
+
+        function isSettingsOpen() {
+            return document.getElementById('settings-backdrop').classList.contains('visible');
+        }
+
+        // ----------------------------------------------------------------------
+        // MAIN
+        // ----------------------------------------------------------------------
+        initSettings();
+        initModal();
+        refresh();
+        startPolling(POLL_INTERVAL);
+    </script>
+</body>
+</html>

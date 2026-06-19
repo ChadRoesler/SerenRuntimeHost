@@ -1,0 +1,91 @@
+# =======================================================================
+#  seren-runtime.yaml - config for SerenRuntimeHost
+# =======================================================================
+#
+#  Two example shapes below - one for cluster mode, one for local-only
+#  mode. Pick one, edit values, copy to seren-runtime.yaml, and run:
+#
+#     dotnet run -- ./seren-runtime.yaml
+#
+#  This file should be chmod 600 and NOT committed to git - it contains
+#  bearer tokens.
+#
+# =======================================================================
+
+# -- RuntimeHost listener config --
+runtime:
+  host: 0.0.0.0          # bind address. 0.0.0.0 = LAN-accessible.
+  port: 6361             # listen port. Distinct from agent (7777) and
+                         # the chat-app's expected port - keeps namespaces
+                         # clean.
+  # Inbound bearer token. Chat-app and dashboard send this in
+  #   Authorization: Bearer <token>
+  # Generate with: head -c 32 /dev/urandom | base64 | tr -d '=+/' | head -c 43
+  # Leave empty for dev mode (auth disabled, header set on every response).
+  bearer_token: "REPLACE-ME-WITH-A-RANDOM-43-CHAR-TOKEN-OR-EMPTY"
+
+  # Path to seren-agent.tar.gz on the HOST filesystem. Used by the
+  # agent-update push endpoints to read the package before streaming it
+  # to nodes. Leave empty to disable agent-update endpoints (returns 409).
+  # Example: ./updates/seren-agent.tar.gz
+  agent_package_path: ""
+
+# -- Cluster config --
+cluster:
+  # Periodic refresh - how often the discovery service re-queries every
+  # agent for its capability list. Failure-driven invalidation handles
+  # node-DOWN instantly; this only matters for node-UP-or-changed.
+  refresh_interval: 00:30:00     # 30 minutes (HH:MM:SS)
+
+  # Per-node timeout for the eager refresh probe. Short - startup
+  # shouldn't block on a node that's powered off.
+  discovery_timeout: 00:00:02    # 2 seconds
+
+  # If true, /api/v1/system/health returns 503 when ANY configured node
+  # is unreachable. If false (default), returns 200 with degraded payload.
+  health_strict_mode: false
+
+  nodes:
+    # -----------------------------------------------------------------
+    #  EXAMPLE 1: Multi-Jetson cluster (delete the local-only example
+    #  below if you use this one)
+    #  With the runtime host on its own machine.
+    # -----------------------------------------------------------------
+    - name: nuc
+      agent_url: http://127.0.0.1:7777
+      agent_token: "REPLACE-WITH-AGENT-TOKEN-FROM-NUC"
+      # Absolute path on this node where seren-agent.tar.gz will be delivered
+      # and seren-agent-update.sh is expected to live. Leave empty to exclude
+      # this node from agent-update operations.
+      agent_update_path: "/home/seren/seren-install"
+      is_host: true
+
+    - name: "WHATEVER-YOUR-NODE-IS-NAMED"
+      agent_url: http://URL-OF-YOUR-NODE:7777
+      agent_token: "REPLACE-WITH-AGENT-TOKEN-FROM-XAVIER32GB"
+      # Below place in the types of services the node supports:
+      # - coral: node has a Coral Edge TPU for Image Classification
+      # - llama: node has llama-cpp and can run llama-cpp-compatible models
+      # - kokoro: node has kokoro for TTS
+      # - whisper: node has OpenAI Whisper for STT
+      # - comfy: node has comfy for for image generation
+      # - chroma: node has ChromaDB for memory management, and retrieval
+      preferred_for: []
+      # Absolute path on this node where seren-agent.tar.gz will be delivered
+      # and seren-agent-update.sh is expected to live. Leave empty to exclude
+      # this node from agent-update operations.
+      agent_update_path: "/home/seren/seren-install"
+      is_host: false
+
+    # -----------------------------------------------------------------
+    #  EXAMPLE 2: Local-only mode (uncomment + delete the multi-Jetson
+    #  example above)
+    #
+    #  Run the agent on the same Linux box (or in WSL2) as RuntimeHost.
+    #  RuntimeHost still does cluster routing - there's just one node in
+    #  the cluster. Same code paths as production; only the YAML differs.
+    # -----------------------------------------------------------------
+    # - name: localhost
+    #   agent_url: http://127.0.0.1:7777
+    #   agent_token: "REPLACE-WITH-LOCAL-AGENT-TOKEN"
+    #   preferred_for: [llama, kokoro, comfy, chroma, whisper]

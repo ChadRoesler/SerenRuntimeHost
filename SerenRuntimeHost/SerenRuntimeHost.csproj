@@ -1,0 +1,64 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SerenRuntimeHost</RootNamespace>
+    <AssemblyName>SerenRuntimeHost</AssemblyName>
+    <!-- Stamped into the assembly; /api/v1/system/version reads it back via
+         ThisAssemblyVersion(). Bump on release. -->
+    <Version>0.1.0</Version>
+    <Description>
+      Cluster head for the Seren stack. Aggregates per-Jetson seren-agent
+      APIs into a unified /api/v1/* surface for the chat-app and dashboard.
+      Also serves the dashboard HTML at /.
+
+      Build/publish flow:
+        # Ease - single-file self-contained for x64 Linux (no .NET on target)
+        dotnet publish -c Release -p:PublishProfile=SelfContained
+
+        # Umph - framework-dependent (smaller, needs .NET 10 runtime on target)
+        dotnet publish -c Release -p:PublishProfile=FxDependent
+
+      Output lands at bin/Release/net10.0/linux-x64/publish/ - rsync that
+      directory to the NUC's ~/seren-runtime-host/.
+    </Description>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Default runtime if not specified on the command line. Override with
+         -r linux-arm64 to publish for an ARM host (untested, but technically
+         valid for running RuntimeHost on a Jetson - not recommended). -->
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">linux-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="18.0.0" />
+    <!-- NCrontab parses standard 5-field cron syntax for the SchedulerService.
+         Tiny dep (~30KB). Maintained, stable. -->
+    <PackageReference Include="NCrontab" Version="3.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SerenCluster\SerenCluster.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="seren-runtime.yaml">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Static web assets. wwwroot/ contains seren-dashboard.html (served at /)
+       and any future static files. CopyToPublishDirectory ensures these
+       follow the artifact, single-file or not. -->
+  <ItemGroup>
+    <Content Include="wwwroot\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
